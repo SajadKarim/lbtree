@@ -6,7 +6,7 @@
 ./keygen 50000 sort dbg-k50k
 
 # search keys are randomly ordered
-./keygen 500 random dbg-search500
+./keygen 500 random dbg-lookup500
 
 # insert keys are randomly ordered and are not in bulkload keys
 ./getinsert 50000 dbg-k50k 500 dbg-insert500

@@ -10,9 +10,9 @@ if [ ! -x $1 ]; then
   exit 0;
 fi
 
-nvmfile=/mnt/mypmem0/chensm/leafdata
+nvmfile=/mnt/tmpfs/tree.lb
 
-cmdinit="$1 thread 2 mempool 50 nvmpool ${nvmfile} 200"
+cmdinit="$1 thread 1 mempool 50 nvmpool ${nvmfile} 4096"
 
 echo 'debug_bulkload'
 echo -n 'Test  1: '

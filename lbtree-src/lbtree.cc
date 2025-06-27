@@ -17,6 +17,9 @@
  */
 
 #include "lbtree.h"
+#include <pthread.h>
+
+pthread_mutex_t tree_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ----------------------------------------------------------------- *
  useful structure
@@ -473,7 +476,8 @@ void * lbtree::lookup (key_type key, int *pos)
     
 Again1:
     // 1. RTM begin
-    if(_xbegin() != _XBEGIN_STARTED) goto Again1;
+    //if(_xbegin() != _XBEGIN_STARTED) goto Again1;
+    pthread_mutex_lock(&tree_lock);
 
     // 2. search nonleaf nodes
     p = tree_meta->tree_root;
@@ -484,7 +488,11 @@ Again1:
         NODE_PREF(p);
 
         // if the lock bit is set, abort
-        if (p->lock()) {_xabort(1); goto Again1;}
+        if (p->lock()) {
+		//_xabort(1); 
+		pthread_mutex_unlock(&tree_lock);
+		goto Again1;
+	}
         
         // binary search to narrow down to at most 8 entries
         b=1; t=p->num();
@@ -511,7 +519,11 @@ Again1:
     LEAF_PREF (lp);
 
     // if the lock bit is set, abort
-    if (lp->lock) {_xabort(2); goto Again1;}
+    if (lp->lock) {
+	    //_xabort(2); 
+	    pthread_mutex_unlock(&tree_lock);
+	    goto Again1;
+	    }
 
     // SIMD comparison
        // a. set every byte to key_hash in a 16B register 
@@ -544,7 +556,8 @@ Again1:
     } // end while
 
     // 4. RTM commit
-    _xend();
+    //_xend();
+    pthread_mutex_unlock(&tree_lock);
 
     *pos=ret_pos;
     return (void *)lp;
@@ -609,12 +622,13 @@ void lbtree::insert (key_type key, void *ptr)
     
 Again2:
     // 1. RTM begin
-    if(_xbegin() != _XBEGIN_STARTED) {
+    /*if(_xbegin() != _XBEGIN_STARTED) {
         // random backoff
         // sum= 0; 
         // for (int i=(rdtsc() % 1024); i>0; i--) sum += i;
         goto Again2;
-    }
+    }*/
+    pthread_mutex_lock(&tree_lock);
 
     // 2. search nonleaf nodes
     p = tree_meta->tree_root;
@@ -625,7 +639,11 @@ Again2:
         NODE_PREF(p);
 
         // if the lock bit is set, abort
-        if (p->lock()) {_xabort(3); goto Again2;}
+        if (p->lock()) {
+		//_xabort(3); 
+		pthread_mutex_unlock(&tree_lock);
+		goto Again2;
+	}
 
         parray[i]= p;
         isfull[i]= (p->num() == NON_LEAF_KEY_NUM);
@@ -655,7 +673,11 @@ Again2:
     LEAF_PREF (lp);
 
     // if the lock bit is set, abort
-    if (lp->lock) {_xabort(4); goto Again2;}
+    if (lp->lock) {
+	    //_xabort(4); 
+	    pthread_mutex_unlock(&tree_lock);
+	    goto Again2;
+    }
 
     parray[0]= lp;
 
@@ -681,7 +703,8 @@ Again2:
         int jj = bitScan(mask)-1;  // next candidate
 
         if (lp->k(jj) == key) { // found: do nothing, return
-           _xend();
+           //_xend();
+	   pthread_mutex_unlock(&tree_lock);
            return;
         }
 
@@ -701,7 +724,8 @@ Again2:
     }
 
     // 5. RTM commit
-    _xend();
+    //_xend();
+    pthread_mutex_unlock(&tree_lock);
 
   } // end of Part 1
 
@@ -1002,12 +1026,13 @@ void lbtree::del (key_type key)
     
 Again3:
     // 1. RTM begin
-    if(_xbegin() != _XBEGIN_STARTED) {
+    /*if(_xbegin() != _XBEGIN_STARTED) {
         // random backoff
         // sum= 0; 
         // for (int i=(rdtsc() % 1024); i>0; i--) sum += i;
         goto Again3;
-    }
+    }*/
+    pthread_mutex_lock(&tree_lock);
 
     // 2. search nonleaf nodes
     p = tree_meta->tree_root;
@@ -1018,7 +1043,11 @@ Again3:
         NODE_PREF(p);
 
         // if the lock bit is set, abort
-        if (p->lock()) {_xabort(5); goto Again3;}
+        if (p->lock()) {
+		//_xabort(5); 
+		pthread_mutex_unlock(&tree_lock);
+		goto Again3;
+	}
 
         parray[i]= p;
 
@@ -1047,7 +1076,12 @@ Again3:
     LEAF_PREF (lp);
 
     // if the lock bit is set, abort
-    if (lp->lock) {_xabort(6); goto Again3;}
+    if (lp->lock) {
+	    //_xabort(6); 
+	    pthread_mutex_unlock(&tree_lock);
+	    goto Again3;
+    }
+
 
     parray[0]= lp;
 
@@ -1082,7 +1116,8 @@ Again3:
     } // end while
 
     if (i < 0) { // not found: do nothing
-       _xend();
+       //_xend();
+       pthread_mutex_unlock(&tree_lock);
        return;
     }
 
@@ -1107,7 +1142,11 @@ Again3:
             }
 
             leaf_sibp= (bleaf *)p;
-            if (leaf_sibp->lock) {_xabort(7); goto Again3;}
+            if (leaf_sibp->lock) {
+		    //_xabort(7); 
+		    pthread_mutex_unlock(&tree_lock);
+		    goto Again3;
+	    }
 
             // lock leaf_sibp
             leaf_sibp->lock= 1;
@@ -1123,7 +1162,8 @@ Again3:
     }
 
     // 5. RTM commit
-    _xend();
+    //_xend();
+    pthread_mutex_unlock(&tree_lock);
 
   } // end of Part 1
 
