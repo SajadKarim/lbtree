@@ -29,7 +29,8 @@ class DirectAPIBenchmark {
 private:
     const size_t INSERT_RECORDS;
     lbtree* tree;
-    char* value_storage;  // Storage for 16-byte values
+    std::vector<uint64_t> operation_data;  // Single dataset for all operations
+    std::vector<char*> value_pointers;     // Track our individually allocated value pointers
     
     // Helper function to create 16-byte value from key
     void createValue(key_type key, char* value) {
@@ -63,22 +64,29 @@ private:
 
 public:
     DirectAPIBenchmark(size_t insert_records = 10000000) 
-        : INSERT_RECORDS(insert_records), tree(nullptr), value_storage(nullptr) {
+        : INSERT_RECORDS(insert_records), tree(nullptr) {
         std::cout << "Direct API Benchmark with 16-byte values - " << INSERT_RECORDS << " records" << std::endl;
         results.success = false;
         results.tree_level = 0;
         
-        // Allocate storage for 16-byte values
-        value_storage = new char[INSERT_RECORDS * 16];
-        std::cout << "Allocated " << (INSERT_RECORDS * 16 / (1024*1024)) << "MB for 16-byte values" << std::endl;
+        // Generate single dataset for all operations
+        GENERATE_RANDOM_NUMBER_ARRAY(1, INSERT_RECORDS + 1, operation_data);
+        std::cout << "Generated random dataset for " << INSERT_RECORDS << " operations" << std::endl;
+        
+        // Initialize value pointers vector (will be populated during insert)
+        value_pointers.resize(INSERT_RECORDS, nullptr);
+        std::cout << "Prepared to track " << INSERT_RECORDS << " individual value pointers" << std::endl;
     }
     
     ~DirectAPIBenchmark() {
         if (tree) {
             delete tree;
         }
-        if (value_storage) {
-            delete[] value_storage;
+        // Clean up individually allocated values
+        for (size_t i = 0; i < value_pointers.size(); i++) {
+            if (value_pointers[i] != nullptr) {
+                delete[] value_pointers[i];
+            }
         }
     }
     
@@ -118,26 +126,44 @@ public:
     void benchmarkPureInsert() {
         std::cout << "\nINSERT BENCHMARK" << std::endl;
         
-        // Generate random keys using your macro
-        std::vector<uint64_t> insert_data;
-        GENERATE_RANDOM_NUMBER_ARRAY(1, INSERT_RECORDS + 1, insert_data);
-        
         // Create a minimal key input for bulkload (like debug_insert does)
         inMemKeyInput *input = new inMemKeyInput(2, 1, 2);
         int level = tree->bulkload(1, input, 1.0);
         delete input;
         
-        std::cout << "Inserting " << INSERT_RECORDS << " records..." << std::endl;
+        std::cout << "Inserting " << INSERT_RECORDS << " records using shared dataset..." << std::endl;
         
         auto start = std::chrono::high_resolution_clock::now();
-        
-        // Direct API calls to insert all records
+
+        // CRITICAL: Flush actual 16-byte values to NVM file (part of insert timing)
+        //std::cout << "Flushing " << INSERT_RECORDS << " 16-byte values to NVM..." << std::endl;
+        std::string nvm_pointers_file = "/mnt/tmpfs/value_pointers_" + std::to_string(INSERT_RECORDS) + ".dat";
+        std::ofstream nvm_file(nvm_pointers_file, std::ios::binary);
+
+        // Direct API calls to insert all records using shared dataset
         for (size_t i = 0; i < INSERT_RECORDS; i++) {
-            key_type key = (key_type)insert_data[i];
-            char* value_ptr = &value_storage[i * 16];
-            createValue(key, value_ptr);
-            tree->insert(key, (void*)value_ptr);
+            key_type key = (key_type)operation_data[i];
+            
+            // Allocate individual 16-byte value
+            char* individual_value = new char[16];
+            createValue(key, individual_value);
+            
+            // Track our individually allocated pointer
+            value_pointers[i] = individual_value;
+            
+            // Insert into LBTree
+            tree->insert(key, (void*)individual_value);
+
+            // Write each 16-byte value to NVM file
+            nvm_file.write(value_pointers[i], 16);
         }
+        
+        // Close and sync the NVM file after all writes
+        nvm_file.flush();
+        nvm_file.close();
+        
+        // Force filesystem sync to ensure data reaches NVM
+        //std::system(("sync " + nvm_pointers_file).c_str());
         
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -151,49 +177,38 @@ public:
     void benchmarkLookup() {
         std::cout << "\nLOOKUP BENCHMARK" << std::endl;
         
-        // Generate lookup keys (same as what we inserted - all 10M records)
-        std::vector<uint64_t> lookup_data;
-        GENERATE_RANDOM_NUMBER_ARRAY(1, INSERT_RECORDS + 1, lookup_data);
-        
         size_t lookup_count = INSERT_RECORDS; // Lookup all records
         
-        std::cout << "Looking up " << lookup_count << " records..." << std::endl;
-        
-        // Debug: Test first few lookups
-        if (lookup_count <= 1000) {
-            std::cout << "Debug: Testing first lookup..." << std::endl;
-            key_type test_key = (key_type)lookup_data[0];
-            int test_pos;
-            void* test_result = tree->lookup(test_key, &test_pos);
-            std::cout << "Debug: First lookup result - key: " << test_key << ", pos: " << test_pos << std::endl;
-            
-            if (test_pos >= 0) {
-                std::cout << "Debug: Accessing leaf..." << std::endl;
-                bleaf* test_leaf = (bleaf*)test_result;
-                std::cout << "Debug: Getting value..." << std::endl;
-                void* test_stored_value = (void*)test_leaf->ch(test_pos).value;
-                std::cout << "Debug: Value pointer: " << test_stored_value << std::endl;
-                if (test_stored_value != nullptr) {
-                    std::cout << "Debug: Verifying value..." << std::endl;
-                    bool test_verify = verifyValue(test_key, (char*)test_stored_value);
-                    std::cout << "Debug: Verification result: " << test_verify << std::endl;
-                }
-            }
-        }
+        std::cout << "Looking up " << lookup_count << " records using shared dataset..." << std::endl;
         
         auto start = std::chrono::high_resolution_clock::now();
         
         int found = 0;
-        int value_matches = 0;
+        int pointer_matches = 0;
+        int content_matches = 0;
         for (size_t i = 0; i < lookup_count; i++) {
-            key_type key = (key_type)lookup_data[i];
+            key_type key = (key_type)operation_data[i];
             int pos;
             void* result = tree->lookup(key, &pos);
             if (pos >= 0) {
                 found++;
-                // For performance testing, skip detailed value verification for now
-                // Just count successful lookups
-                value_matches++;
+                
+                // Get pointer from LBTree
+                bleaf* leaf = (bleaf*)result;
+                void* lbtree_ptr = (void*)leaf->ch(pos).value;
+                
+                // Compare with our tracked pointer
+                char* expected_ptr = value_pointers[i];
+                if (lbtree_ptr == (void*)expected_ptr) {
+                    pointer_matches++;
+                }
+                
+                // CRITICAL: Actually access and compare the 16-byte content
+                // This forces CPU to load the actual values from memory
+                // char* actual_value = (char*)lbtree_ptr;
+                // if (memcmp(actual_value, expected_ptr, 16) == 0) {
+                //     content_matches++;
+                // }
             }
         }
         
@@ -202,23 +217,23 @@ public:
         results.lookup_time_ms = duration.count() / 1000.0;
         results.lookup_throughput = (lookup_count * 1000.0) / results.lookup_time_ms;
         
-        std::cout << "LOOKUP COMPLETED - Time: " << std::fixed << std::setprecision(2) << results.lookup_time_ms << " ms, Throughput: " << std::fixed << std::setprecision(0) << results.lookup_throughput << " ops/sec, Found: " << found << "/" << lookup_count << ", Value matches: " << value_matches << "/" << found << std::endl;
+        std::cout << "LOOKUP COMPLETED - Time: " << std::fixed << std::setprecision(2) << results.lookup_time_ms << " ms, Throughput: " << std::fixed << std::setprecision(0) << results.lookup_throughput << " ops/sec, Found: " << found << "/" << lookup_count << ", Pointer matches: " << pointer_matches << "/" << found << ", Content matches: " << content_matches << "/" << found << std::endl;
     }
     
     void benchmarkDelete() {
         std::cout << "\nDELETE BENCHMARK" << std::endl;
         
-        // Delete all records that were inserted
         size_t delete_count = INSERT_RECORDS;
         
-        std::cout << "Deleting " << delete_count << " records..." << std::endl;
+        std::cout << "Deleting " << delete_count << " records using shared dataset..." << std::endl;
         
         auto start = std::chrono::high_resolution_clock::now();
         
-        // Delete all keys from 1 to INSERT_RECORDS
-        for (size_t i = 1; i <= delete_count; i++) {
-            key_type key = (key_type)i;
+        // Delete using same random order as insert/lookup
+        for (size_t i = 0; i < delete_count; i++) {
+            key_type key = (key_type)operation_data[i];
             tree->del(key);
+            delete [] value_pointers[i]; // Clean up individual value
         }
         
         auto end = std::chrono::high_resolution_clock::now();
