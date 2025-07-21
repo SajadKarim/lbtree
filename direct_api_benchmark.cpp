@@ -133,11 +133,21 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
         
         int found = 0;
+        int value_matches = 0;
         for (size_t i = 0; i < lookup_count; i++) {
             key_type key = (key_type)lookup_data[i];
             int pos;
             void* result = tree->lookup(key, &pos);
-            if (pos >= 0) found++;
+            if (pos >= 0) {
+                found++;
+                // Get the actual stored value from the leaf
+                bleaf* leaf = (bleaf*)result;
+                void* stored_value = (void*)leaf->ch(pos).value;
+                // Verify that the stored value matches the expected key
+                if ((key_type)stored_value == key) {
+                    //value_matches++;
+                }
+            }
         }
         
         auto end = std::chrono::high_resolution_clock::now();
@@ -145,7 +155,7 @@ public:
         results.lookup_time_ms = duration.count() / 1000.0;
         results.lookup_throughput = (lookup_count * 1000.0) / results.lookup_time_ms;
         
-        std::cout << "LOOKUP COMPLETED - Time: " << std::fixed << std::setprecision(2) << results.lookup_time_ms << " ms, Throughput: " << std::fixed << std::setprecision(0) << results.lookup_throughput << " ops/sec, Found: " << found << "/" << lookup_count << std::endl;
+        std::cout << "LOOKUP COMPLETED - Time: " << std::fixed << std::setprecision(2) << results.lookup_time_ms << " ms, Throughput: " << std::fixed << std::setprecision(0) << results.lookup_throughput << " ops/sec, Found: " << found << "/" << lookup_count << ", Value matches: " << value_matches << "/" << found << std::endl;
     }
     
     void benchmarkDelete() {
