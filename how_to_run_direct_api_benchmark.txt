@@ -1,0 +1,4 @@
+cd /home/skarim/Code/lbtree/lbtree_bkup && g++ -o direct_api_benchmark -O3 -std=c++11 -pthread -mrtm -msse4.1 -mavx2 -I./common direct_api_benchmark.cpp lbtree_lib_fixed.cc ./common/tree.cc ./common/mempool.cc ./common/nvm-common.cc -lpmem
+
+
+cd /home/skarim/Code/lbtree/lbtree_bkup && ./direct_api_benchmark 10000000

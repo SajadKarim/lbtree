@@ -1505,13 +1505,3 @@ tree * initTree(void *nvm_addr, bool recover)
     return mytree;
 }
 
-int main (int argc, char *argv[])
-{
-    printf("NON_LEAF_KEY_NUM= %d, LEAF_KEY_NUM= %d, nonleaf size= %lu, leaf size= %lu\n",
-           NON_LEAF_KEY_NUM, LEAF_KEY_NUM, sizeof(bnode), sizeof(bleaf));
-    assert((sizeof(bnode) == NONLEAF_SIZE)&&(sizeof(bleaf) == LEAF_SIZE));
-
-    initUseful();
-
-    return parse_command (argc, argv);
-}

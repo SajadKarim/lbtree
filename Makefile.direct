@@ -1,0 +1,26 @@
+CC=g++
+
+# Optimized flags for benchmark
+CFLAGS=-O3 -std=c++11 -pthread -mrtm -msse4.1 -mavx2
+
+INCLUDE=-I./common -I.
+LIB=-lpmem
+
+COMMON_DEPENDS= ./common/tree.h ./common/keyinput.h ./common/mempool.h ./common/mempool.cc ./common/nodepref.h ./common/nvm-common.h ./common/nvm-common.cc ./common/performance.h
+COMMON_SOURCES= ./common/mempool.cc ./common/nvm-common.cc
+
+LBTREE_DEPENDS= lbtree-src/lbtree.h lbtree-src/lbtree.cc ${COMMON_DEPENDS}
+LBTREE_SOURCES= lbtree-src/lbtree.cc ${COMMON_SOURCES}
+
+# Create lbtree object file without main function
+lbtree_no_main.o: lbtree-src/lbtree.cc
+	${CC} ${CFLAGS} ${INCLUDE} -c lbtree-src/lbtree.cc -o lbtree_no_main.o -DSKIP_MAIN
+
+# Build direct benchmark
+direct_benchmark: direct_benchmark.cpp lbtree_no_main.o ${COMMON_SOURCES}
+	${CC} -o $@ ${CFLAGS} ${INCLUDE} direct_benchmark.cpp lbtree_no_main.o ${COMMON_SOURCES} ${LIB}
+
+clean:
+	-rm -rf direct_benchmark direct_lbtree_benchmark_results.txt /tmp/direct_lbtree_benchmark.nvm
+
+.PHONY: clean

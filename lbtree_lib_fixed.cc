@@ -16,7 +16,7 @@
  * size is limited to up to 128B.
  */
 
-#include "lbtree.h"
+#include "lbtree-src/lbtree.h"
 #include <pthread.h>
 
 pthread_mutex_t tree_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -26,7 +26,7 @@ pthread_mutex_t tree_lock = PTHREAD_MUTEX_INITIALIZER;
  * ----------------------------------------------------------------- */
 static int last_slot_in_line[LEAF_KEY_NUM];
 
-static void initUseful(void)
+void initUseful(void)
 {
     // line 0
     last_slot_in_line[0]= 2;
@@ -1505,13 +1505,3 @@ tree * initTree(void *nvm_addr, bool recover)
     return mytree;
 }
 
-int main (int argc, char *argv[])
-{
-    printf("NON_LEAF_KEY_NUM= %d, LEAF_KEY_NUM= %d, nonleaf size= %lu, leaf size= %lu\n",
-           NON_LEAF_KEY_NUM, LEAF_KEY_NUM, sizeof(bnode), sizeof(bleaf));
-    assert((sizeof(bnode) == NONLEAF_SIZE)&&(sizeof(bleaf) == LEAF_SIZE));
-
-    initUseful();
-
-    return parse_command (argc, argv);
-}

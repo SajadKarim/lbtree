@@ -1,0 +1,22 @@
+CC=g++
+
+# Flag for benchmark runs
+CFLAGS=-O3 -std=c++11 -pthread -mrtm -msse4.1 -mavx2
+
+INCLUDE=-I./common -I.
+LIB=-lpmem
+
+COMMON_DEPENDS= ./common/tree.h ./common/tree.cc ./common/keyinput.h ./common/mempool.h ./common/mempool.cc ./common/nodepref.h ./common/nvm-common.h ./common/nvm-common.cc ./common/performance.h
+COMMON_SOURCES= ./common/tree.cc ./common/mempool.cc ./common/nvm-common.cc
+
+LBTREE_DEPENDS= lbtree-src/lbtree.h lbtree-src/lbtree.cc ${COMMON_DEPENDS}
+LBTREE_SOURCES= lbtree-src/lbtree.cc ${COMMON_SOURCES}
+
+# -----------------------------------------------------------------------------
+benchmark: lbtree_benchmark.cpp ${LBTREE_DEPENDS}
+	${CC} -o $@ ${CFLAGS} ${INCLUDE} lbtree_benchmark.cpp ${LBTREE_SOURCES} ${LIB}
+
+clean:
+	-rm -rf benchmark lbtree_benchmark_results.txt /tmp/lbtree_benchmark.nvm
+
+.PHONY: clean
