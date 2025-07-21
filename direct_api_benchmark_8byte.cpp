@@ -25,30 +25,10 @@ extern void initUseful(void);
     std::shuffle(__VECTOR__.begin(), __VECTOR__.end(), _eng); \
 }
 
-class DirectAPIBenchmark {
+class DirectAPIBenchmark8Byte {
 private:
     const size_t INSERT_RECORDS;
     lbtree* tree;
-    char* value_storage;  // Storage for 16-byte values
-    
-    // Helper function to create 16-byte value from key
-    void createValue(key_type key, char* value) {
-        // Clear the array
-        memset(value, 0, 16);
-        // Store key in first 8 bytes
-        memcpy(value, &key, sizeof(key_type));
-        // Fill remaining 8 bytes with pattern based on key
-        for (int i = 8; i < 16; i++) {
-            value[i] = (char)((key >> ((i-8) * 8)) & 0xFF);
-        }
-    }
-    
-    // Helper function to verify value matches expected key
-    bool verifyValue(key_type key, const char* value) {
-        key_type stored_key;
-        memcpy(&stored_key, value, sizeof(key_type));
-        return stored_key == key;
-    }
     
     struct BenchmarkResults {
         double insert_time_ms;
@@ -62,23 +42,16 @@ private:
     } results;
 
 public:
-    DirectAPIBenchmark(size_t insert_records = 10000000) 
-        : INSERT_RECORDS(insert_records), tree(nullptr), value_storage(nullptr) {
-        std::cout << "Direct API Benchmark with 16-byte values - " << INSERT_RECORDS << " records" << std::endl;
+    DirectAPIBenchmark8Byte(size_t insert_records = 10000000) 
+        : INSERT_RECORDS(insert_records), tree(nullptr) {
+        std::cout << "Direct API Benchmark with 8-byte pointer values - " << INSERT_RECORDS << " records" << std::endl;
         results.success = false;
         results.tree_level = 0;
-        
-        // Allocate storage for 16-byte values
-        value_storage = new char[INSERT_RECORDS * 16];
-        std::cout << "Allocated " << (INSERT_RECORDS * 16 / (1024*1024)) << "MB for 16-byte values" << std::endl;
     }
     
-    ~DirectAPIBenchmark() {
+    ~DirectAPIBenchmark8Byte() {
         if (tree) {
             delete tree;
-        }
-        if (value_storage) {
-            delete[] value_storage;
         }
     }
     
@@ -97,11 +70,11 @@ public:
         the_thread_mempools.init(1, mem_size, 4096);
         
         // Initialize NVM pool (1GB for 10M records) - Use Optane PMEM
-        const char* nvm_filename = "/mnt/tmpfs/direct_api_benchmark_16byte.nvm";
+        const char* nvm_filename = "/mnt/tmpfs/direct_api_benchmark_8byte.nvm";
         long long nvm_size = 1024 * 1024 * 1024; // 1GB
         
         // Clean up any existing NVM file
-        std::system("rm -f /mnt/tmpfs/direct_api_benchmark_16byte.nvm");
+        std::system("rm -f /mnt/tmpfs/direct_api_benchmark_8byte.nvm");
         
         the_thread_nvmpools.init(1, nvm_filename, nvm_size);
         
@@ -131,12 +104,10 @@ public:
         
         auto start = std::chrono::high_resolution_clock::now();
         
-        // Direct API calls to insert all records
+        // Direct API calls to insert all records (store key as pointer value)
         for (size_t i = 0; i < INSERT_RECORDS; i++) {
             key_type key = (key_type)insert_data[i];
-            char* value_ptr = &value_storage[i * 16];
-            createValue(key, value_ptr);
-            tree->insert(key, (void*)value_ptr);
+            tree->insert(key, (void*)key);  // Store key as 8-byte pointer
         }
         
         auto end = std::chrono::high_resolution_clock::now();
@@ -159,28 +130,6 @@ public:
         
         std::cout << "Looking up " << lookup_count << " records..." << std::endl;
         
-        // Debug: Test first few lookups
-        if (lookup_count <= 1000) {
-            std::cout << "Debug: Testing first lookup..." << std::endl;
-            key_type test_key = (key_type)lookup_data[0];
-            int test_pos;
-            void* test_result = tree->lookup(test_key, &test_pos);
-            std::cout << "Debug: First lookup result - key: " << test_key << ", pos: " << test_pos << std::endl;
-            
-            if (test_pos >= 0) {
-                std::cout << "Debug: Accessing leaf..." << std::endl;
-                bleaf* test_leaf = (bleaf*)test_result;
-                std::cout << "Debug: Getting value..." << std::endl;
-                void* test_stored_value = (void*)test_leaf->ch(test_pos).value;
-                std::cout << "Debug: Value pointer: " << test_stored_value << std::endl;
-                if (test_stored_value != nullptr) {
-                    std::cout << "Debug: Verifying value..." << std::endl;
-                    bool test_verify = verifyValue(test_key, (char*)test_stored_value);
-                    std::cout << "Debug: Verification result: " << test_verify << std::endl;
-                }
-            }
-        }
-        
         auto start = std::chrono::high_resolution_clock::now();
         
         int found = 0;
@@ -191,9 +140,13 @@ public:
             void* result = tree->lookup(key, &pos);
             if (pos >= 0) {
                 found++;
-                // For performance testing, skip detailed value verification for now
-                // Just count successful lookups
-                value_matches++;
+                // Get the stored pointer value
+                bleaf* leaf = (bleaf*)result;
+                void* stored_value = (void*)leaf->ch(pos).value;
+                // Verify that the stored pointer matches the expected key
+                if ((key_type)stored_value == key) {
+                    value_matches++;
+                }
             }
         }
         
@@ -289,7 +242,7 @@ int main(int argc, char* argv[]) {
             insert_records = std::stoull(argv[1]);
         }
         
-        DirectAPIBenchmark benchmark(insert_records);
+        DirectAPIBenchmark8Byte benchmark(insert_records);
         benchmark.runDirectAPIBenchmark();
         
         return 0;
